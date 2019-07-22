@@ -1,0 +1,10 @@
+{
+  "property_name": "Test Property",
+  "first_name": "John",
+  "last_name": "Doe",
+  "street_address": "111 Main St.",
+  "apartment_number": "Suite A",
+  "city": "Denver",
+  "state": "Colorado",
+  "zipcode": "80111"
+}

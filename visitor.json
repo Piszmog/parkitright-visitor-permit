@@ -1,0 +1,18 @@
+{
+  "first_name": "John",
+  "last_name": "Doe",
+  "email_address": "test@email.com",
+  "phone_number": "303-111-2222",
+  "street_address": "111 Main St.",
+  "apartment_number": "Suite A",
+  "city": "Denver",
+  "zipcode": "80111",
+  "vehicle": {
+    "year": "2000",
+    "make": "Toyota",
+    "model": "Tacoma",
+    "color": "Green",
+    "licence_plate_number": "111-AAA",
+    "license_plate_state_issuer": "Colorado"
+  }
+}
