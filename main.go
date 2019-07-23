@@ -3,10 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/pkg/errors"
+	"io/ioutil"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,15 +50,33 @@ type Vehicle struct {
 }
 
 func main() {
+	residentJSONFile := flag.String("r", "", "Resident JSON file")
+	visitorJSONFile := flag.String("v", "", "Visitor JSON file")
+	flag.Parse()
+	if len(*residentJSONFile) == 0 {
+		log.Println("Resident file -r is required")
+		flag.Usage()
+		return
+	} else if len(*visitorJSONFile) == 0 {
+		log.Println("Visitor file -v is required")
+		flag.Usage()
+		return
+	}
 	//
 	// Input Data
 	//
-	resident, err := getResident("resident.json")
+	resident, err := getResident(*residentJSONFile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	visitor, err := getVisitor("visitor.json")
+	if err = validateResident(resident); err != nil {
+		log.Fatal(err)
+	}
+	visitor, err := getVisitor(*visitorJSONFile)
 	if err != nil {
+		log.Fatal(err)
+	}
+	if err = validateVisitor(visitor); err != nil {
 		log.Fatal(err)
 	}
 
@@ -65,9 +88,11 @@ func main() {
 	defer cancel()
 
 	// run task list
+	var detailsBuf []byte
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(`https://www.parkitrightpermit.com/park-it-right-contact-visitor-permit-request/`),
 		chromedp.WaitVisible(createSelector("property-name")),
+		chromedp.Sleep(2*time.Second),
 		// Resident
 		chromedp.SendKeys(createSelector("property-name"), resident.PropertyName),
 		chromedp.SendKeys(createSelector("first-name-of-resident"), resident.FirstName),
@@ -92,14 +117,20 @@ func main() {
 		chromedp.SendKeys(createSelector("visitor-color"), visitor.Vehicle.Color),
 		chromedp.SendKeys(createSelector("visitor-license-plate-number"), visitor.Vehicle.LicencePlateNumber),
 		chromedp.SendKeys(createSelector("visitor-state-of-issuance"), visitor.Vehicle.LicensePlateStateIssuer),
+		// Screenshot details
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return screenshot(ctx, 90, &detailsBuf)
+		}),
 		// Send
 		chromedp.Submit("visitors"),
-		// Sleep
-		chromedp.Sleep(20*time.Second),
 	)
 	if err != nil {
 		log.Println(err)
 		return
+	}
+	detailsScreenshotFile := fmt.Sprintf("%s-%s-%s-registration.png", visitor.FirstName, visitor.LastName, time.Now().Format("20060102"))
+	if err := ioutil.WriteFile(detailsScreenshotFile, detailsBuf, 0644); err != nil {
+		log.Fatal(err)
 	}
 }
 
@@ -160,6 +191,93 @@ func closeFile(file *os.File) {
 	}
 }
 
+func validateResident(resident resident) error {
+	if len(resident.FirstName) == 0 {
+		return errors.New("resident first name is required")
+	} else if len(resident.LastName) == 0 {
+		return errors.New("resident last name is required")
+	} else if len(resident.PropertyName) == 0 {
+		return errors.New("resident property name is required")
+	} else if len(resident.StreetAddress) == 0 {
+		return errors.New("resident street address is required")
+	} else if len(resident.ApartmentNumber) == 0 {
+		return errors.New("resident apartment number is required")
+	} else if len(resident.City) == 0 {
+		return errors.New("resident city is required")
+	} else if len(resident.State) == 0 {
+		return errors.New("resident state is required")
+	} else if len(resident.ZipCode) == 0 {
+		return errors.New("resident zipcode is required")
+	}
+	return nil
+}
+
+func validateVisitor(visitor visitor) error {
+	if len(visitor.FirstName) == 0 {
+		return errors.New("visitor first name is required")
+	} else if len(visitor.LastName) == 0 {
+		return errors.New("visitor last name is required")
+	} else if len(visitor.StreetAddress) == 0 {
+		return errors.New("visitor street address is required")
+	} else if len(visitor.ApartmentNumber) == 0 {
+		return errors.New("visitor apartment number is required")
+	} else if len(visitor.City) == 0 {
+		return errors.New("visitor city is required")
+	} else if len(visitor.ZipCode) == 0 {
+		return errors.New("visitor zipcode is required")
+	} else if len(visitor.EmailAddress) == 0 {
+		return errors.New("visitor email address is required")
+	} else if len(visitor.PhoneNumber) == 0 {
+		return errors.New("visitor phone number is required")
+	} else if len(visitor.Vehicle.Year) == 0 {
+		return errors.New("visitor vehicle year is required")
+	} else if len(visitor.Vehicle.Make) == 0 {
+		return errors.New("visitor vehicle make is required")
+	} else if len(visitor.Vehicle.Model) == 0 {
+		return errors.New("visitor vehicle model is required")
+	} else if len(visitor.Vehicle.Color) == 0 {
+		return errors.New("visitor vehicle color is required")
+	} else if len(visitor.Vehicle.LicencePlateNumber) == 0 {
+		return errors.New("visitor vehicle license plate number is required")
+	} else if len(visitor.Vehicle.LicensePlateStateIssuer) == 0 {
+		return errors.New("visitor vehicle license plate state issuer is required")
+	}
+	return nil
+}
+
 func createSelector(propertyName string) string {
 	return fmt.Sprintf(`//input[@name="%s"]`, propertyName)
+}
+
+func screenshot(ctx context.Context, quality int64, res *[]byte) error {
+	// get layout metrics
+	_, _, contentSize, err := page.GetLayoutMetrics().Do(ctx)
+	if err != nil {
+		return err
+	}
+	width, height := int64(math.Ceil(contentSize.Width)), int64(math.Ceil(contentSize.Height))
+	// force viewport emulation
+	err = emulation.SetDeviceMetricsOverride(width, height, 1, false).
+		WithScreenOrientation(&emulation.ScreenOrientation{
+			Type:  emulation.OrientationTypePortraitPrimary,
+			Angle: 0,
+		}).Do(ctx)
+	if err != nil {
+		return err
+	}
+
+	// capture screenshot
+	*res, err = page.CaptureScreenshot().
+		WithQuality(quality).
+		WithClip(&page.Viewport{
+			X:      contentSize.X,
+			Y:      contentSize.Y,
+			Width:  contentSize.Width,
+			Height: contentSize.Height,
+			Scale:  1,
+		}).Do(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
 }
